@@ -11,6 +11,7 @@ from rewards.clip import CLIPLoss
 from rewards.hps import HPSLoss
 from rewards.imagereward import ImageRewardLoss
 from rewards.pickscore import PickScoreLoss
+from rewards.orient import OrientLoss
 
 
 def get_reward_losses(
@@ -61,6 +62,12 @@ def get_reward_losses(
         reward_losses.append(
             AestheticLoss(
                 args.aesthetic_weighting, dtype, device, cache_dir, memsave=args.memsave
+            )
+        )
+    if args.enable_orient:
+        reward_losses.append(
+            OrientLoss(
+                args.orient_weighting, dtype, device, cache_dir, memsave=args.memsave
             )
         )
     return reward_losses

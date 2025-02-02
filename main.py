@@ -5,14 +5,21 @@ import os
 import blobfile as bf
 import torch
 from datasets import load_dataset
-from pytorch_lightning import seed_everything
+#from pytorch_lightning import seed_everything
 from tqdm import tqdm
 
 from arguments import parse_args
 from models import get_model, get_multi_apply_fn
 from rewards import get_reward_losses
 from training import LatentNoiseTrainer, get_optimizer
+import numpy as np
 
+def seed_everything(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 def main(args):
     seed_everything(args.seed)
@@ -281,6 +288,34 @@ def main(args):
         for k in total_best_rewards.keys():
             total_best_rewards[k] /= len(parti_dataset)
             total_init_rewards[k] /= len(parti_dataset)
+    elif args.task == "orient":
+        prompt_list_file = "./assets/orient_prompts.json"
+        with open(prompt_list_file) as fp:
+            metadatas = json.load(fp)["data"]
+        init_latents = torch.randn(shape, device=device, dtype=dtype).clone()
+        for index, metadata in enumerate(metadatas):
+            # Get new latents and optimizer
+            #init_latents = torch.randn(shape, device=device, dtype=dtype)
+            latents = torch.nn.Parameter(init_latents, requires_grad=True)
+            optimizer = get_optimizer(args.optim, latents, args.lr, args.nesterov)
+            prompt = metadata["prompt"]
+            orientation = np.array(metadata["orientation"])
+            save_dir = f"{args.save_dir}/{args.task}/{prompt}_({orientation[0]},{orientation[1]},{orientation[2]})_reg_{args.enable_reg}_lr_{args.lr}_seed_{args.seed}"
+            os.makedirs(save_dir, exist_ok=True)    
+            init_image, best_image, init_rewards, best_rewards = trainer.train_orient(
+                latents, prompt, orientation, optimizer, save_dir, multi_apply_fn
+            )
+            logging.info(f"Initial rewards: {init_rewards}")
+            logging.info(f"Best rewards: {best_rewards}")
+            #os.makedirs(f"{outpath}/samples", exist_ok=True)
+            #with open(f"{outpath}/metadata.jsonl", "w") as fp:
+            #    json.dump(metadata, fp)
+            if index == 0:
+                total_best_rewards = {k: 0.0 for k in best_rewards.keys()}
+                total_init_rewards = {k: 0.0 for k in best_rewards.keys()}
+            for k in best_rewards.keys():
+                total_best_rewards[k] += best_rewards[k]
+                total_init_rewards[k] += init_rewards[k]
     else:
         raise ValueError(f"Unknown task {args.task}")
     # log total rewards

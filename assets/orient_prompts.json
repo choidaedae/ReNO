@@ -1,0 +1,14 @@
+{
+    "data": [
+      {
+        "prompt": "a photo of a car",
+        "orientation": [90, 90, 90]
+      },
+
+      {
+        "prompt": "a photo of a car",
+        "orientation": [0, 90, 90]
+      }
+    ]
+  }
+  

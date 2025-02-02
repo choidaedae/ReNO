@@ -9,13 +9,13 @@ def parse_args():
         "--cache_dir",
         type=str,
         help="HF cache directory",
-        default="/shared-local/aoq951/HF_CACHE/",
+        default="/root/.cache/huggingface/hub",
     )
     parser.add_argument(
         "--save_dir",
         type=str,
         help="Directory to save images",
-        default="/shared-local/aoq951/ReNO/outputs",
+        default="./results",
     )
 
     # model and optim
@@ -87,6 +87,18 @@ def parse_args():
         default=0.0,
     )
     parser.add_argument(
+        "--disable_orient",
+        default=True,
+        action="store_false",
+        dest="enable_orient",
+    )
+    parser.add_argument(
+        "--orient_weighting",
+        type=float,
+        help="Weighting for Orientation Alignment",
+        default=1.0,
+    )
+    parser.add_argument(
         "--disable_reg", default=True, action="store_false", dest="enable_reg"
     )
     parser.add_argument(
@@ -105,6 +117,7 @@ def parse_args():
             "parti-prompts",
             "geneval",
             "example-prompts",
+            "orient"
         ],
     )
     parser.add_argument(

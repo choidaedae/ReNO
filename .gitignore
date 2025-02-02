@@ -3,5 +3,7 @@
 /seg_outputs
 /ckpts
 /weight
-
+/results
+/models*
+/.*
 __pycache__
