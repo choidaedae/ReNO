@@ -6,6 +6,7 @@ import blobfile as bf
 import torch
 from datasets import load_dataset
 from tqdm import tqdm
+from pytorch_lightning import seed_everything
 
 from arguments import parse_args
 from models import get_model, get_multi_apply_fn
@@ -117,10 +118,10 @@ def main(args):
         prompt_list_file = "./assets/orient_prompts.json"
         with open(prompt_list_file) as fp:
             metadatas = json.load(fp)["data"]
-        init_latents = torch.randn(shape, device=device, dtype=dtype).clone()
+        init_latents = torch.randn(shape, device=device, dtype=dtype)
         for index, metadata in enumerate(metadatas):
             # Get new latents and optimizer
-            latents = torch.nn.Parameter(init_latents, requires_grad=True)
+            latents = torch.nn.Parameter(init_latents.clone(), requires_grad=True)
             optimizer = get_optimizer(args.optim, latents, args.lr, args.nesterov)
             prompt = metadata["prompt"]
             orientation = np.array(metadata["orientation"])

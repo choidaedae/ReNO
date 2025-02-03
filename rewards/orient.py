@@ -89,7 +89,7 @@ class OrientLoss:
     def score_diff(self, target_orientation, image):
         azimuth_distribution, polar_distribution, rotation_distribution = self.orientation_to_distribution(target_orientation)
         gt_distribution = torch.unsqueeze(torch.cat([azimuth_distribution, polar_distribution, rotation_distribution]), dim=0).to(dtype=self.dtype, device=self.device)
-        cur_distribution = self.orient_estimator.inference(image)[:, :-2]
+        cur_distribution = self.orient_estimator.inference((image - self.mean) / self.std)[:, :-2]
         rewards = torch.nn.functional.kl_div(cur_distribution.log(), gt_distribution, reduction='batchmean')
 
         return rewards

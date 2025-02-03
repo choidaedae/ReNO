@@ -217,7 +217,8 @@ class LatentNoiseTrainer:
                 rewards[reward_loss.name] = loss.item()
             """
             reward_loss = self.reward_losses[-1]
-            loss = reward_loss(preprocessed_image, orientation)
+            loss = reward_loss(image, orientation)
+            #loss = reward_loss(preprocessed_image, orientation)
             to_log += f"{reward_loss.name}: {loss.item():.4f}, "
             total_loss += loss * reward_loss.weighting
             rewards[reward_loss.name] = loss.item()
