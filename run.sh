@@ -1,6 +1,6 @@
 #!/bin/bash
 
-for seed in {0..99}
+for seed in {0..9}
 do
     python run_orient.py \
         --task "orient" \
