@@ -151,8 +151,10 @@ class LatentNoiseTrainer:
         optimizer: torch.optim.Optimizer,
         save_dir: Optional[str] = None,
         multi_apply_fn=None,
+        save_last=False,
+        noise_optimize=False
     ) -> Tuple[PIL.Image.Image, Dict[str, float], Dict[str, float]]:
-        logging.info(f"Optimizing latents for prompt '{prompt}'.")
+        
         best_loss = torch.inf
         best_image = None
         initial_image = None
@@ -160,30 +162,28 @@ class LatentNoiseTrainer:
         best_rewards = None
         best_latents = None
         latent_dim = math.prod(latents.shape[1:])
-
         generator = torch.Generator("cuda").manual_seed(self.seed)
+        
+        reward_loss = self.reward_losses[-1]
+
         image = self.model.apply(
-                    latents,
-                    prompt,
+                    latents=latents,
+                    prompt=prompt,
                     generator=generator,
                     num_inference_steps=self.n_inference_steps,
                 )
-        
-        image_numpy = image.detach().cpu().permute(0, 2, 3, 1).float().numpy()
-        image_pil = DiffusionPipeline.numpy_to_pil(image_numpy)[0]
-        image_pil.save(f"{save_dir}/init.png")
+
         for iteration in range(self.n_iters):
             to_log = ""
             rewards = {}
             optimizer.zero_grad()
-            #generator = torch.Generator("cuda").manual_seed(self.seed)
             if self.imageselect:
                 new_latents = torch.randn_like(
                     latents, device=self.device, dtype=latents.dtype
                 )
                 image = self.model.apply(
-                    new_latents,
-                    prompt,
+                    latents=new_latents,
+                    prompt=prompt,
                     generator=generator,
                     num_inference_steps=self.n_inference_steps,
                 )
@@ -194,6 +194,10 @@ class LatentNoiseTrainer:
                     generator=generator,
                     num_inference_steps=self.n_inference_steps,
                 )
+
+            if save_last and iteration == self.n_iters - 1:
+                image_numpy = image.detach().cpu().permute(0, 2, 3, 1).float().numpy()
+                last_image_pil = DiffusionPipeline.numpy_to_pil(image_numpy)[0]
             if initial_image is None:
                 if multi_apply_fn is not None:
                     initial_image = multi_apply_fn(latents.detach(), prompt)
@@ -208,16 +212,9 @@ class LatentNoiseTrainer:
                 break
 
             total_loss = 0
-            preprocessed_image = self.preprocess_fn(image)
-            """
-            for reward_loss in self.reward_losses[:-1]:
-                loss = reward_loss(preprocessed_image, orientation)
-                to_log += f"{reward_loss.name}: {loss.item():.4f}, "
-                total_loss += loss * reward_loss.weighting
-                rewards[reward_loss.name] = loss.item()
-            """
-            reward_loss = self.reward_losses[-1]
+            #preprocessed_image = self.preprocess_fn(image)
             loss = reward_loss(image, orientation)
+            print(loss.item())
             #loss = reward_loss(preprocessed_image, orientation)
             to_log += f"{reward_loss.name}: {loss.item():.4f}, "
             total_loss += loss * reward_loss.weighting
@@ -235,8 +232,6 @@ class LatentNoiseTrainer:
                 to_log += f", Latent norm: {latent_norm.item()}"
                 rewards["norm"] = latent_norm.item()
                 total_loss += regularization.to(total_loss.dtype)
-            if self.log_metrics:
-                logging.info(f"Iteration {iteration}: {to_log}")
             if total_reward_loss < best_loss:
                 best_loss = total_reward_loss
                 best_image = image
@@ -252,6 +247,7 @@ class LatentNoiseTrainer:
                 image_pil.save(f"{save_dir}/{iteration}.png")
             if initial_rewards is None:
                 initial_rewards = rewards
+        
         image_numpy = best_image.detach().cpu().permute(0, 2, 3, 1).float().numpy()
         best_image_pil = DiffusionPipeline.numpy_to_pil(image_numpy)[0]
         if multi_apply_fn is not None:
@@ -260,4 +256,8 @@ class LatentNoiseTrainer:
                 multi_step_image.detach().cpu().permute(0, 2, 3, 1).float().numpy()
             )
             best_image_pil = DiffusionPipeline.numpy_to_pil(image_numpy)[0]
-        return initial_image, best_image_pil, initial_rewards, best_rewards
+
+        if save_last:
+            return initial_image, last_image_pil, initial_rewards, best_rewards
+        else:
+            return initial_image, best_image_pil, initial_rewards, best_rewards

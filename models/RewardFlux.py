@@ -429,6 +429,7 @@ class RewardFluxPipeline(FluxPipeline):
             latents = (
                 latents / self.vae.config.scaling_factor
             ) + self.vae.config.shift_factor
+            breakpoint()
             image = self.vae.decode(latents, return_dict=False)[0]
             image = (image / 2 + 0.5).clamp(0, 1)
             # image = self.image_processor.postprocess(image, output_type=output_type)

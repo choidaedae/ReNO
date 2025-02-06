@@ -105,13 +105,13 @@ class DINOv2_MLP(nn.Module):
         super().__init__()
         # self.dinov2 = AutoModel.from_pretrained(DINO_BASE)
         if dino_mode == 'base':
-            self.dinov2 = FLIP_DINOv2.from_pretrained(DINO_BASE, cache_dir='./')
+            self.dinov2 = FLIP_DINOv2.from_pretrained(DINO_BASE, cache_dir='/root/data/model')
         elif dino_mode == 'large':
-            self.dinov2 = FLIP_DINOv2.from_pretrained(DINO_LARGE, cache_dir='./')
+            self.dinov2 = FLIP_DINOv2.from_pretrained(DINO_LARGE, cache_dir='/root/data/model')
         elif dino_mode == 'small':
-            self.dinov2 = FLIP_DINOv2.from_pretrained(DINO_SMALL, cache_dir='./')
+            self.dinov2 = FLIP_DINOv2.from_pretrained(DINO_SMALL, cache_dir='/root/data/model')
         elif dino_mode == 'giant':
-            self.dinov2 = FLIP_DINOv2.from_pretrained(DINO_GIANT, cache_dir='./')
+            self.dinov2 = FLIP_DINOv2.from_pretrained(DINO_GIANT, cache_dir='/root/data/model')
         print(dino_mode)
         self.down_sampler = MLP_dim(in_dim=in_dim, out_dim=out_dim)
         self.random_mask  = False

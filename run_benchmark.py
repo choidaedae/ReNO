@@ -1,12 +1,11 @@
 import json
-import logging
 import os
 
 import blobfile as bf
 import torch
 from datasets import load_dataset
 from tqdm import tqdm
-from pytorch_lightning import seed_everything
+from torchvision.transforms.functional import to_pil_image
 
 from arguments import parse_args
 from models import get_model, get_multi_apply_fn
@@ -14,7 +13,13 @@ from rewards import get_reward_losses
 from training import LatentNoiseTrainer, get_optimizer
 import numpy as np
 
+from pathlib import Path
+import yaml
+import random
+
 def seed_everything(seed):
+    random.seed(seed)
+    np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
@@ -23,9 +28,6 @@ def seed_everything(seed):
 
 def main(args):
     seed_everything(args.seed)
-    bf.makedirs(f"{args.save_dir}/logs/{args.task}")
-    # Set up logging and name settings
-    logger = logging.getLogger()
     settings = (
         f"{args.model}{'_' + args.prompt if args.task == 't2i-compbench' else ''}"
         f"{'_no-optim' if args.no_optim else ''}_{args.seed if args.task != 'geneval' else ''}"
@@ -37,18 +39,7 @@ def main(args):
         f"{'_imagereward' + str(args.imagereward_weighting) if args.enable_imagereward else ''}"
         f"{'_aesthetic' + str(args.aesthetic_weighting) if args.enable_aesthetic else ''}"
     )
-    file_stream = open(f"{args.save_dir}/logs/{args.task}/{settings}.txt", "w")
-    handler = logging.StreamHandler(file_stream)
-    formatter = logging.Formatter("%(asctime)s - %(message)s")
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    logger.setLevel("INFO")
-    consoleHandler = logging.StreamHandler()
-    consoleHandler.setFormatter(formatter)
-    logger.addHandler(consoleHandler)
-    logging.info(args)
     if args.device_id is not None:
-        logging.info(f"Using CUDA device {args.device_id}")
         os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
         os.environ["CUDA_VISIBLE_DEVICES"] = args.device_id
     device = torch.device("cuda")
@@ -58,6 +49,24 @@ def main(args):
         dtype = torch.float16
     # Get reward losses
     reward_losses = get_reward_losses(args, dtype, device, args.cache_dir)
+
+    def save_config(path, dic):
+        if isinstance(path, str):
+            path = Path(path)
+        if path.suffix == "":
+            path.mkdir(exist_ok=True, parents=True)
+            path = path / "config.yaml"
+        elif path.suffix == ".yaml" or path.suffix == ".yml":
+            dirpath = path.parent
+            dirpath.mkdir(exist_ok=True, parents=True)
+        else:
+            raise ValueError
+        with open(path, "w") as f:
+            yaml.dump(dic, f)
+
+    args_dic = vars(args)
+    args.save_dir = f"{args.save_dir}/{args.model}"
+    save_config(args.save_dir + "/config.yaml", args_dic)
 
     # Get model and noise trainer
     pipe = get_model(
@@ -115,34 +124,48 @@ def main(args):
         multi_apply_fn = None
 
     if args.task == "orient":
-        prompt_list_file = "./assets/orient_prompts.json"
-        with open(prompt_list_file) as fp:
-            metadatas = json.load(fp)["data"]
-        init_latents = torch.randn(shape, device=device, dtype=dtype)
-        for index, metadata in enumerate(metadatas):
-            # Get new latents and optimizer
-            latents = torch.nn.Parameter(init_latents.clone(), requires_grad=True)
-            optimizer = get_optimizer(args.optim, latents, args.lr, args.nesterov)
-            prompt = metadata["prompt"]
-            orientation = np.array(metadata["orientation"])
-            save_dir = f"{args.save_dir}/{args.task}/{prompt}_({orientation[0]},{orientation[1]},{orientation[2]})_reg_{args.enable_reg}_lr_{args.lr}_seed_{args.seed}"
-            os.makedirs(save_dir, exist_ok=True)    
-            init_image, best_image, init_rewards, best_rewards = trainer.train_orient(
-                latents, prompt, orientation, optimizer, save_dir, multi_apply_fn
-            )
-            logging.info(f"Initial rewards: {init_rewards}")
-            logging.info(f"Best rewards: {best_rewards}")
-            if index == 0:
-                total_best_rewards = {k: 0.0 for k in best_rewards.keys()}
-                total_init_rewards = {k: 0.0 for k in best_rewards.keys()}
-            for k in best_rewards.keys():
-                total_best_rewards[k] += best_rewards[k]
-                total_init_rewards[k] += init_rewards[k]
+        with open(args.benchmark_path) as fp:
+            metadatas = json.load(fp)
+            prompts = metadatas["prompts"] 
+            orientations = metadatas["orientations"]
+        if args.noise_optimize:
+            seeds = np.random.randint(0, 10000, size=args.n_noises-1).tolist()
+            generator = [torch.Generator("cuda").manual_seed(args.seed)] + [torch.Generator("cuda").manual_seed(seed) for seed in seeds]
+            init_latents = [torch.randn(shape, generator=generator[i], device=device, dtype=dtype) for i in range(args.n_noises)]
+            init_latents = torch.cat(init_latents, dim=0).to(device)
+        else:
+            init_latents = torch.randn(shape, generator=torch.Generator("cuda").manual_seed(args.seed), device=device, dtype=dtype)
+        for i, prompt in enumerate(prompts):
+            for j, orientation in enumerate(orientations):
+                if args.noise_optimize:
+                    losses = torch.zeros(init_latents.shape[0])
+                    for k in range(init_latents.shape[0]):
+                        image = trainer.model.apply(
+                            latents=init_latents[k].unsqueeze(0).clone(),
+                            prompt=prompt,
+                            generator = generator[0],
+                            num_inference_steps = args.n_inference_steps,
+                        )
+                        losses[k] = trainer.reward_losses[-1](image, orientation)
+                    best_noise_idx = int(torch.argmin(losses))
+                    latents = init_latents[best_noise_idx]
+                    latents = torch.nn.Parameter(latents.unsqueeze(0).clone(), requires_grad=True)
+                else:
+                    latents = torch.nn.Parameter(init_latents.clone(), requires_grad=True)
+                optimizer = get_optimizer(args.optim, latents, args.lr, args.nesterov)
+                save_dir = f"{args.save_dir}/reg_{args.enable_reg}_lr_{args.lr}_seed_{args.seed}_noise_optimize_{args.noise_optimize}_noises_{args.n_noises}"
+                os.makedirs(save_dir, exist_ok=True)    
+                init_image, last_image, _, _= trainer.train_orient(
+                    latents, prompt, orientation, optimizer, save_dir, multi_apply_fn, args.save_last, args.noise_optimize
+                )
+                init_image.save(f"{save_dir}/prompt_{i}_orientation_{j}_init.png")
+                last_image.save(f"{save_dir}/prompt_{i}_orientation_{j}_result.png")
+
+        with open(f"{save_dir}/benchmark.json", "w") as f:
+            json.dump(metadatas, f)
     else:
         raise ValueError(f"Unknown task {args.task}")
     # log total rewards
-    logging.info(f"Mean initial rewards: {total_init_rewards}")
-    logging.info(f"Mean best rewards: {total_best_rewards}")
 
 
 if __name__ == "__main__":

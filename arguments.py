@@ -153,5 +153,13 @@ def parse_args():
         "--multi_step_model", type=str, help="Model to use", default="flux"
     )
 
+    parser.add_argument("--save_init", action="store_true", default=False, help="Save initial image")
+    parser.add_argument("--save_last", action="store_true", default=False, help="Save last image or best image")
+    parser.add_argument("--benchmark_path", type=str, required=True, help="path for benchmark")
+
+    parser.add_argument("--noise_optimize", action="store_true", default=False, help="path for benchmark")
+    parser.add_argument("--n_noises", type=int, default=0, help="path for benchmark")
+
     args = parser.parse_args()
+    assert (args.noise_optimize and args.n_noises > 1) or not args.noise_optimize, "n_noises must be greater than 1 for noise optimization"
     return args

@@ -117,11 +117,13 @@ def get_model(
             torch_dtype=torch.bfloat16,
             cache_dir=cache_dir,
         )
-        pipe.to(device, dtype)
+        pipe.to(device)
     else:
         raise ValueError(f"Unknown model name: {model_name}")
     if enable_sequential_cpu_offload:
         pipe.enable_sequential_cpu_offload()
+        pipe.vae.enable_slicing()
+        pipe.vae.enable_tiling()
     return pipe
 
 

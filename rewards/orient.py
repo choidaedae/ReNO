@@ -20,8 +20,7 @@ class OrientLoss:
         self.name = "Orient"
         self.weighting = weighting
         self.dtype = dtype
-
-        ckpt_path = hf_hub_download(repo_id="Viglong/Orient-Anything", filename="croplargeEX2/dino_weight.pt", repo_type="model", cache_dir='./', resume_download=True) # large    
+        ckpt_path = hf_hub_download(repo_id="Viglong/Orient-Anything", filename="croplargeEX2/dino_weight.pt", repo_type="model", cache_dir=cache_dir, resume_download=True) # large    
         self.orient_estimator = DINOv2_MLP(
             dino_mode='large',
             in_dim=1024,
@@ -90,9 +89,6 @@ class OrientLoss:
         azimuth_distribution, polar_distribution, rotation_distribution = self.orientation_to_distribution(target_orientation)
         gt_distribution = torch.unsqueeze(torch.cat([azimuth_distribution, polar_distribution, rotation_distribution]), dim=0).to(dtype=self.dtype, device=self.device)
         cur_distribution = self.orient_estimator.inference((image - self.mean) / self.std)[:, :-2]
-        print(f"azimuth: {torch.argmax(cur_distribution[:, 0:360])}")
-        print(f"polar: {torch.argmax(cur_distribution[:, 360:540])}")
-        print(f"rotation: {torch.argmax(cur_distribution[:, 540:720])}")
         rewards = torch.nn.functional.kl_div(cur_distribution.log(), gt_distribution, reduction='batchmean')
 
         return rewards

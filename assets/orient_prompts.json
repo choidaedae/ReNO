@@ -1,14 +1,5 @@
 {
-    "data": [
-      {
-        "prompt": "a photo of a car",
-        "orientation": [90, 90, 90]
-      },
-
-      {
-        "prompt": "a photo of a car",
-        "orientation": [0, 90, 90]
-      }
-    ]
-  }
+    "prompts": ["a photo of a chair", "a photo of a chair", "a photo of a chair", "a photo of a chair"],
+    "orientations": [[0, 90, 90], [90, 90, 90], [45, 90, 90], [-45, 90, 90]]
+}
   
