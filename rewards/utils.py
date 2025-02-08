@@ -67,7 +67,7 @@ def get_reward_losses(
     if args.enable_orient:
         reward_losses.append(
             OrientLoss(
-                args.orient_weighting, dtype, device, cache_dir, memsave=args.memsave
+                args.orient_weighting, dtype, device, cache_dir, background_preprocess=args.background_preprocess, sigmas=args.sigmas, memsave=args.memsave
             )
         )
     return reward_losses

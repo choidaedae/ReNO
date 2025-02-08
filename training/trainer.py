@@ -9,6 +9,8 @@ from diffusers import DiffusionPipeline
 
 from rewards import clip_img_transform
 from rewards.base_reward import BaseRewardLoss
+import numpy as np 
+import matplotlib.pyplot as plt 
 
 
 class LatentNoiseTrainer:
@@ -152,7 +154,7 @@ class LatentNoiseTrainer:
         save_dir: Optional[str] = None,
         multi_apply_fn=None,
         save_last=False,
-        noise_optimize=False
+        indexes=Tuple[int, int],
     ) -> Tuple[PIL.Image.Image, Dict[str, float], Dict[str, float]]:
         
         best_loss = torch.inf
@@ -165,6 +167,20 @@ class LatentNoiseTrainer:
         generator = torch.Generator("cuda").manual_seed(self.seed)
         
         reward_loss = self.reward_losses[-1]
+        
+        azimuth_distribution, polar_distribution, rotation_distribution = reward_loss.orientation_to_distribution(orientation)
+        gt_distribution = torch.unsqueeze(torch.cat([azimuth_distribution, polar_distribution, rotation_distribution]), dim=0)
+        split_sizes = [360, 180, 180]
+        angles = ['azimuth', 'polar', 'rotation']
+        split_tensors = np.split(gt_distribution[0], np.cumsum(split_sizes)[:-1])
+        fig, axes = plt.subplots(3, 1, figsize=(10, 8))
+
+        for i, split_tensor in enumerate(split_tensors):
+            axes[i].plot(split_tensor)
+            axes[i].set_title(f'{angles[i]}: {np.argmax(split_tensor)}')
+
+        plt.tight_layout()
+        plt.savefig(f"{save_dir}/gt_distribution.png")
 
         image = self.model.apply(
                     latents=latents,
@@ -213,8 +229,10 @@ class LatentNoiseTrainer:
 
             total_loss = 0
             #preprocessed_image = self.preprocess_fn(image)
-            loss = reward_loss(image, orientation)
-            print(loss.item())
+            loss, fig = reward_loss(image, orientation)
+            if self.save_all_images:
+                fig.savefig(f"{save_dir}/prompt_{indexes[0]}_orientation_{indexes[1]}_{iteration}_orientation.png")
+            print(f"iteation {iteration}, {loss.item()}")
             #loss = reward_loss(preprocessed_image, orientation)
             to_log += f"{reward_loss.name}: {loss.item():.4f}, "
             total_loss += loss * reward_loss.weighting
@@ -244,7 +262,7 @@ class LatentNoiseTrainer:
             if self.save_all_images:
                 image_numpy = image.detach().cpu().permute(0, 2, 3, 1).float().numpy()
                 image_pil = DiffusionPipeline.numpy_to_pil(image_numpy)[0]
-                image_pil.save(f"{save_dir}/{iteration}.png")
+                image_pil.save(f"{save_dir}/prompt_{indexes[0]}_orientation_{indexes[1]}_{iteration}.png")
             if initial_rewards is None:
                 initial_rewards = rewards
         

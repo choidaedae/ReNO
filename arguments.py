@@ -159,6 +159,9 @@ def parse_args():
 
     parser.add_argument("--noise_optimize", action="store_true", default=False, help="path for benchmark")
     parser.add_argument("--n_noises", type=int, default=0, help="path for benchmark")
+    parser.add_argument("--background_preprocess", action="store_true", default=False, help="path for benchmark")
+    parser.add_argument("--sigmas", nargs=3, type=float, default=(20.0, 2.0, 1.0), help="sigmas for orientation loss, azimuth, polar, rotation")
+
 
     args = parser.parse_args()
     assert (args.noise_optimize and args.n_noises > 1) or not args.noise_optimize, "n_noises must be greater than 1 for noise optimization"
