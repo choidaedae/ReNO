@@ -63,13 +63,14 @@ def resize_foreground_torch(
 
     return new_image
 
-def differentiable_background_preprocess(decoded_x0: torch.Tensor):
+def differentiable_background_preprocess(decoded_x0: torch.Tensor, seg: bool = False, predefined_bbox=None) -> torch.Tensor:
     # Preprocess background with differentiable manner
     """
     Input:
         decoded_x0: torch.Tensor,  (1, C, H, W)
     """
     decoded_x0 = decoded_x0.squeeze(0)
+    C, H, W = decoded_x0.shape
     
     img = T.ToPILImage()(decoded_x0.detach().clone().cpu().to(torch.float32))
     rembg_session = rembg.new_session()
@@ -78,12 +79,47 @@ def differentiable_background_preprocess(decoded_x0: torch.Tensor):
     alpha = torch.from_numpy(np.array(removed_image))[..., 3] > 0
     nonzero_coords = torch.nonzero(alpha, as_tuple=True)
 
-    mask = torch.from_numpy(np.array(removed_image)[:, :, :-1] != 0).to(decoded_x0.dtype).to(decoded_x0.device).permute(2, 0, 1)
+    if len(nonzero_coords[0]) == 0 or len(nonzero_coords[1]) == 0:
+        return decoded_x0.unsqueeze(0)
 
-    removed_x0 = mask * decoded_x0
+    # Use bounding box and expand it
+    y_min, x_min = nonzero_coords[0].min().item(), nonzero_coords[1].min().item()
+    y_max, x_max = nonzero_coords[0].max().item(), nonzero_coords[1].max().item()
+
+    # Expand bounding box by a factor of 1/0.85
+    scale_factor = 1 / 0.85
+    box_height = y_max - y_min + 1
+    box_width = x_max - x_min + 1
+
+    if seg:
+        mask = torch.from_numpy(np.array(removed_image)[:, :, :-1] != 0).to(decoded_x0.dtype).to(decoded_x0.device).permute(2, 0, 1)
+
+        removed_x0 = mask * decoded_x0
+    else:
+        # Calculate new expanded coordinates
+        new_y_min = max(0, int(y_min - (scale_factor - 1) * box_height / 2))
+        new_y_max = min(H, int(y_max + (scale_factor - 1) * box_height / 2))
+        new_x_min = max(0, int(x_min - (scale_factor - 1) * box_width / 2))
+        new_x_max = min(W, int(x_max + (scale_factor - 1) * box_width / 2))
+        # mask = torch.from_numpy(np.array(removed_image)[:, :, :-1] != 0).to(decoded_x0.dtype).to(decoded_x0.device).permute(2, 0, 1)
+        # Create expanded bounding box mask
+        bounding_box_mask = torch.zeros_like(decoded_x0).to(decoded_x0.dtype).to(decoded_x0.device)
+        bounding_box_mask[:, new_y_min:new_y_max+1, new_x_min:new_x_max+1] = 1.0
+
+        # Apply mask
+        removed_x0 = bounding_box_mask * decoded_x0
+
+    if predefined_bbox:
+        new_x_min, new_x_max, new_y_min, new_y_max = predefined_bbox
+        # Create expanded bounding box mask
+        bounding_box_mask = torch.zeros_like(decoded_x0).to(decoded_x0.dtype).to(decoded_x0.device)
+        bounding_box_mask[:, new_y_min:new_y_max+1, new_x_min:new_x_max+1] = 1.0
+
+        # Apply mask
+        removed_x0 = bounding_box_mask * decoded_x0
 
     # Resize foreground object
-    removed_x0 = resize_foreground_torch(removed_x0, ratio=0.85, nonzero_coords=nonzero_coords)
+    removed_x0 = resize_foreground_torch(removed_x0, ratio=1.0, nonzero_coords=nonzero_coords)
     
     return removed_x0.unsqueeze(0)
 
@@ -102,6 +138,7 @@ class OrientLoss:
         memsave: bool = False,
     ):
         self.name = "Orient"
+        self.log = ""
         self.weighting = weighting
         self.dtype = dtype
         ckpt_path = hf_hub_download(repo_id="Viglong/Orient-Anything", filename="croplargeEX2/dino_weight.pt", repo_type="model", cache_dir=cache_dir, resume_download=True) # large    
@@ -118,6 +155,12 @@ class OrientLoss:
         self.background_preprocess = background_preprocess
     
         self.azimuth_sigma, self.polar_sigma, self.rotation_sigma = sigmas
+
+        self.transform = transforms.Compose([
+            transforms.Resize((256, 256), interpolation=transforms.InterpolationMode.BICUBIC),  # Bicubic Resize
+            transforms.CenterCrop((224, 224)),  # Center Crop to 224x224
+            transforms.Lambda(lambda x: (x - self.mean) / self.std)  # Normalize
+        ])
 
         # for normalization
         self.mean = torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32).view(1, 3, 1, 1).to(self.device)
@@ -175,20 +218,17 @@ class OrientLoss:
     def score_diff(self, target_orientation, image):
         azimuth_distribution, polar_distribution, rotation_distribution = self.orientation_to_distribution(target_orientation)
         gt_distribution = torch.unsqueeze(torch.cat([azimuth_distribution, polar_distribution, rotation_distribution]), dim=0).to(dtype=self.dtype, device=self.device)
-        if self.background_preprocess:
-            image = differentiable_background_preprocess(image)
+        if self.background_preprocess == "seg":
+            image = differentiable_background_preprocess(image, seg=True)
+        elif self.background_preprocess == "bbox":
+            image = differentiable_background_preprocess(image, seg=False)
+        elif self.background_preprocess == "predefined_bbox":
+            image = differentiable_background_preprocess(image, seg=False, predefined_bbox=self.predefined_bbox)
 
-        transform = transforms.Compose([
-            transforms.Resize((256, 256), interpolation=transforms.InterpolationMode.BICUBIC),  # Bicubic Resize
-            transforms.CenterCrop((224, 224)),  # Center Crop to 224x224
-            transforms.Lambda(lambda x: (x - self.mean) / self.std)  # Normalize
-        ])
+        cur_distribution = self.orient_estimator.inference((self.transform(image)))[:, :-2]
 
-        # image = image * 255 *0.00392156862745098
-        # cur_distribution = self.orient_estimator.inference((image - self.mean) / self.std)[:, :-2]
-        cur_distribution = self.orient_estimator.inference((transform(image)))[:, :-2]
-
-        print(f"azimuth: {torch.argmax(cur_distribution[:, 0:360], dim=1).item()}, polar: {torch.argmax(cur_distribution[:, 360:540], dim=1).item()}, rotation: {torch.argmax(cur_distribution[:, 540:720], dim=1).item()}")
+        self.log += f"azimuth: {torch.argmax(cur_distribution[:, 0:360], dim=1).item()}, polar: {torch.argmax(cur_distribution[:, 360:540], dim=1).item()}, rotation: {torch.argmax(cur_distribution[:, 540:720], dim=1).item()}\n"
+        # print(f"azimuth: {torch.argmax(cur_distribution[:, 0:360], dim=1).item()}, polar: {torch.argmax(cur_distribution[:, 360:540], dim=1).item()}, rotation: {torch.argmax(cur_distribution[:, 540:720], dim=1).item()}")
         azimuth_rewards = torch.nn.functional.kl_div(cur_distribution[:, 0:360].log(), gt_distribution[:, 0:360], reduction='batchmean')
         polar_rewards = torch.nn.functional.kl_div(cur_distribution[:, 360:540].log(), gt_distribution[:, 360:540], reduction='batchmean')
         rotation_rewards = torch.nn.functional.kl_div(cur_distribution[:, 540:720].log(), gt_distribution[:, 540:720], reduction='batchmean')

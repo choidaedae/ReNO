@@ -159,7 +159,7 @@ def parse_args():
 
     parser.add_argument("--noise_optimize", action="store_true", default=False, help="path for benchmark")
     parser.add_argument("--n_noises", type=int, default=0, help="path for benchmark")
-    parser.add_argument("--background_preprocess", action="store_true", default=False, help="path for benchmark")
+    parser.add_argument("--background_preprocess", type=str, default="no", choices=["no", "seg", "bbox", "predefined_bbox"], help="path for benchmark")
     parser.add_argument("--sigmas", nargs=3, type=float, default=(20.0, 2.0, 1.0), help="sigmas for orientation loss, azimuth, polar, rotation")
 
 

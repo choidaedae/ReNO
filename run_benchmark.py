@@ -136,7 +136,6 @@ def main(args):
             init_latents = torch.randn(shape, generator=torch.Generator("cuda").manual_seed(args.seed), device=device, dtype=dtype)
         for i, prompt in enumerate(prompts):
             for j, orientation in enumerate(orientations):
-                breakpoint()
                 if args.noise_optimize:
                     losses = torch.zeros(init_latents.shape[0])
                     for k in range(init_latents.shape[0]):
@@ -155,11 +154,19 @@ def main(args):
                 optimizer = get_optimizer(args.optim, latents, args.lr, args.nesterov)
                 save_dir = f"{args.save_dir}/reg_{args.enable_reg}_lr_{args.lr}_seed_{args.seed}_noise_optimize_{args.noise_optimize}_noises_{args.n_noises}"
                 os.makedirs(save_dir, exist_ok=True)    
+                
+                if args.background_preprocess == "predefined_bbox":
+                    trainer.reward_losses[-1].predefined_bbox = metadatas["bboxes"][args.seed]
+
                 init_image, last_image, _, _= trainer.train_orient(
                     latents, prompt, orientation, optimizer, save_dir, multi_apply_fn, args.save_last, indexes=(i, j)
                 )
+
                 init_image.save(f"{save_dir}/prompt_{i}_orientation_{j}_init.png")
                 last_image.save(f"{save_dir}/prompt_{i}_orientation_{j}_result.png")
+                with open(f"{save_dir}/prompt_{i}_orientation_{j}_logs.txt", "w") as f:
+                    f.write(trainer.reward_losses[-1].log)
+                    trainer.reward_losses[-1].log = ""
         save_config(f"{save_dir}/config.yaml", args_dic)
 
         with open(f"{save_dir}/benchmark.json", "w") as f:
